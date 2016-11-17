@@ -371,6 +371,7 @@
 	            xhr.open('GET', url, true);
 	            xhr.setRequestHeader('Cache-Control', 'no-cache, must-revalidate');
 	            xhr.setRequestHeader('Authorization', "Bearer " + _this.__accessToken);
+	            xhr.setRequestHeader('Accept', 'application/json');
 	            xhr.timeout = 15000;
 	            xhr.onerror = function (e) {
 	                reject(new Error("Unable to fetch playlist: Network error (" + xhr.status + ")"));
@@ -525,6 +526,7 @@
 	                '&c[id][]=eq%20' + encodeURIComponent(_this.__fileId);
 	            xhr.open('GET', url, true);
 	            xhr.setRequestHeader('Authorization', "Bearer " + _this.__accessToken);
+	            xhr.setRequestHeader('Accept', 'application/json');
 	            xhr.timeout = 15000;
 	            xhr.onerror = function (e) {
 	                reject(new Error("Unable to fetch playlist: Network error (" + xhr.status + ")"));

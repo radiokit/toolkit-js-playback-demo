@@ -1,0 +1,101 @@
+<html>
+<head>
+  <title>RadioKit JS Toolkit Playback Demo</title>
+  <meta charset="utf-8">
+  <script src="/radiokit-toolkit-playback.js"></script>
+
+  <script>
+  function init() {
+    window.player = new RadioKitToolkitPlayback.Channel.Player("fd9a7d1c-a387-40a0-b876-2799668d6f9d", "123");
+    window.player.on('track-playback-started', function(track) {
+      document.getElementById('track-id').innerHTML = 'TRACK ID: ' + track.getId();
+
+      track.getInfoAsync()
+        .then(function(trackInfo) {
+
+          // Name
+          document.getElementById('track-name').innerHTML = 'NAME: ' + trackInfo.getName();
+
+          // Metadata
+          var metadataInfo = trackInfo.getMetadata();
+          var metadataText = 'METADATA:<ul>';
+          metadataKeys = Object.keys(metadataInfo);
+          for(var i = 0; i < metadataKeys.length; i++) {
+            metadataText += '<li><b>' + metadataKeys[i] + '</b>: ' + metadataInfo[metadataKeys[i]] + '</li>';
+          }
+          metadataText += '</ul>';
+
+          document.getElementById('track-metadata').innerHTML = metadataText;
+
+          // Affiliates
+          var affiliatesInfo = trackInfo.getAffiliates();
+          var affiliatesText = 'AFFILIATES:<ul>';
+          affiliatesKeys = Object.keys(affiliatesInfo);
+          for(var i = 0; i < affiliatesKeys.length; i++) {
+            affiliatesText += '<li><b>' + affiliatesKeys[i] + '</b>: ' + JSON.stringify(affiliatesInfo[affiliatesKeys[i]]) + '</li>';
+          }
+          affiliatesText += '</ul>';
+
+          document.getElementById('track-affiliates').innerHTML = affiliatesText;
+        })
+        .catch(function(reason) {
+          throw reason;
+        });
+    });
+    window.player.on('track-position', function(track, position, duration) {
+      document.getElementById('track-position').innerHTML = 'POSITION: ' + position + ' / ' + duration + ' ms';
+    });
+  }
+
+
+  function toggle() {
+    var button = document.getElementById('button');
+
+    if(window.player.isStarted()) {
+      button.innerHTML = "PLAY";
+      window.player.stop();
+    } else {
+      button.innerHTML = "STOP";
+      window.player.start();
+    }
+  }
+
+
+  function setVolume(volume) {
+    window.player.setVolume(volume);
+  }
+  </script>
+</head>
+
+<body onload="init()" style="text-align: center">
+  <button onclick="toggle()" id="button" style="width: 400px; height: 200px; font-size: 24pt">PLAY</button>
+
+  <br><br>
+
+  <button onclick="setVolume(0.25)" style="width: 97px; height: 50px; font-size: 11pt">VOL 25%</button>
+  <button onclick="setVolume(0.50)" style="width: 97px; height: 50px; font-size: 11pt">VOL 50%</button>
+  <button onclick="setVolume(0.75)" style="width: 97px; height: 50px; font-size: 11pt">VOL 75%</button>
+  <button onclick="setVolume(1.0)" style="width: 97px; height: 50px; font-size: 11pt">VOL 100%</button>
+
+  <br><br>
+
+  <div id="track-id" style="width: 400px; text-align: center; margin: 0 auto"></div>
+
+  <br>
+
+  <div id="track-position" style="width: 400px; text-align: center; margin: 0 auto"></div>
+
+  <br>
+
+  <div id="track-name" style="width: 400px; text-align: center; margin: 0 auto"></div>
+
+  <br>
+
+  <div id="track-metadata" style="width: 400px; text-align: left; margin: 0 auto"></div>
+
+  <br>
+
+  <div id="track-affiliates" style="width: 400px; text-align: left; margin: 0 auto"></div>
+
+</body>
+</html>

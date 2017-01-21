@@ -71,18 +71,19 @@
 	var Base_1 = __webpack_require__(2);
 	var SyncClock_1 = __webpack_require__(3);
 	var PlaylistFetcher_1 = __webpack_require__(4);
-	var AudioManager_1 = __webpack_require__(8);
+	var AudioManager_1 = __webpack_require__(10);
 	var Player = (function (_super) {
 	    __extends(Player, _super);
 	    function Player(channelId, accessToken) {
-	        _super.call(this);
-	        this.__fetchTimeoutId = 0;
-	        this.__clock = null;
-	        this.__playlistFetcher = null;
-	        this.__volume = 1.0;
-	        this.__started = false;
-	        this.__channelId = channelId;
-	        this.__accessToken = accessToken;
+	        var _this = _super.call(this) || this;
+	        _this.__fetchTimeoutId = 0;
+	        _this.__clock = null;
+	        _this.__playlistFetcher = null;
+	        _this.__volume = 1.0;
+	        _this.__started = false;
+	        _this.__channelId = channelId;
+	        _this.__accessToken = accessToken;
+	        return _this;
 	    }
 	    Player.prototype.start = function () {
 	        this.__startFetching();
@@ -96,10 +97,12 @@
 	    Player.prototype.stop = function () {
 	        this.__stopFetching();
 	        this.__started = false;
-	        this.__audioManager.offAll();
-	        this.__audioManager.cleanup();
-	        delete this.__audioManager;
-	        this.__audioManager = undefined;
+	        if (this.__audioManager) {
+	            this.__audioManager.offAll();
+	            this.__audioManager.cleanup();
+	            delete this.__audioManager;
+	            this.__audioManager = undefined;
+	        }
 	        return this;
 	    };
 	    Player.prototype.setVolume = function (volume) {
@@ -295,9 +298,10 @@
 	var SyncClock = (function (_super) {
 	    __extends(SyncClock, _super);
 	    function SyncClock(serverDate) {
-	        _super.call(this);
-	        this.__offset = serverDate - Date.now();
-	        this.debug("Synchronized clock: offset = " + this.__offset + " ms");
+	        var _this = _super.call(this) || this;
+	        _this.__offset = serverDate - Date.now();
+	        _this.debug("Synchronized clock: offset = " + _this.__offset + " ms");
+	        return _this;
 	    }
 	    SyncClock.makeAsync = function () {
 	        var promise = new Promise(function (resolve, reject) {
@@ -344,7 +348,7 @@
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
-	var Playlist_1 = __webpack_require__(5);
+	var PlaylistResolver_1 = __webpack_require__(5);
 	var PlaylistFetcher = (function () {
 	    function PlaylistFetcher(accessToken, channelId, clock) {
 	        this.__clock = clock;
@@ -386,7 +390,14 @@
 	                if (xhr.readyState === 4) {
 	                    if (xhr.status === 200) {
 	                        var responseAsJson = JSON.parse(xhr.responseText);
-	                        resolve(Playlist_1.Playlist.makeFromJson(_this.__accessToken, responseAsJson["data"]));
+	                        var resolver = new PlaylistResolver_1.PlaylistResolver(_this.__accessToken, responseAsJson['data']);
+	                        resolver.resolveAsync()
+	                            .then(function (playlist) {
+	                            resolve(playlist);
+	                        })
+	                            .catch(function (error) {
+	                            reject(new Error("Unable to resolve playlist (" + error.message + ")"));
+	                        });
 	                    }
 	                    else {
 	                        reject(new Error("Unable to fetch playlist: Unexpected response (status = " + xhr.status + ")"));
@@ -407,23 +418,102 @@
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
-	var Track_1 = __webpack_require__(6);
+	var Playlist_1 = __webpack_require__(6);
+	var PlaylistResolver = (function () {
+	    function PlaylistResolver(accessToken, playlistRaw) {
+	        this.__playlistRaw = playlistRaw;
+	        this.__accessToken = accessToken;
+	    }
+	    PlaylistResolver.prototype.resolveAsync = function () {
+	        var _this = this;
+	        var promise = new Promise(function (resolve, reject) {
+	            var xhr = new XMLHttpRequest();
+	            var fileIds = [];
+	            for (var _i = 0, _a = _this.__playlistRaw; _i < _a.length; _i++) {
+	                var file = _a[_i];
+	                fileIds.push(encodeURIComponent(file["file"]));
+	            }
+	            var url = 'https://vault.radiokitapp.org/api/rest/v1.0/data/record/file' +
+	                '?a[]=id' +
+	                '&a[]=public_url' +
+	                '&c[id][]=in%20' + fileIds.join("%20");
+	            xhr.open('GET', url, true);
+	            xhr.setRequestHeader('Cache-Control', 'no-cache, must-revalidate');
+	            xhr.setRequestHeader('Authorization', "Bearer " + _this.__accessToken);
+	            xhr.setRequestHeader('Accept', 'application/json');
+	            xhr.timeout = 15000;
+	            var audio = new Audio();
+	            var knownFormats = [];
+	            if (audio.canPlayType('application/ogg; codecs=opus')) {
+	                knownFormats.push('application/ogg; codecs=opus');
+	            }
+	            if (audio.canPlayType('application/ogg; codecs=vorbis')) {
+	                knownFormats.push('application/ogg; codecs=vorbis');
+	            }
+	            if (audio.canPlayType('audio/mpeg')) {
+	                knownFormats.push('audio/mpeg');
+	            }
+	            xhr.setRequestHeader('X-RadioKit-KnownFormats', knownFormats.join(', '));
+	            xhr.onerror = function (e) {
+	                reject(new Error("Unable to fetch playlist: Network error (" + xhr.status + ")"));
+	            };
+	            xhr.onabort = function (e) {
+	                reject(new Error("Unable to fetch playlist: Aborted"));
+	            };
+	            xhr.ontimeout = function (e) {
+	                reject(new Error("Unable to fetch playlist: Timeout"));
+	            };
+	            xhr.onreadystatechange = function () {
+	                if (xhr.readyState === 4) {
+	                    if (xhr.status === 200) {
+	                        var responseAsJson = JSON.parse(xhr.responseText);
+	                        var responseData = responseAsJson['data'];
+	                        resolve(Playlist_1.Playlist.makeFromJson(_this.__accessToken, _this.__playlistRaw, responseData));
+	                    }
+	                    else {
+	                        reject(new Error("Unable to fetch files: Unexpected response (status = " + xhr.status + ")"));
+	                    }
+	                }
+	            };
+	            xhr.send();
+	        });
+	        return promise;
+	    };
+	    return PlaylistResolver;
+	}());
+	exports.PlaylistResolver = PlaylistResolver;
+
+
+/***/ },
+/* 6 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+	var Track_1 = __webpack_require__(7);
 	var Playlist = (function () {
 	    function Playlist(tracks) {
 	        this.__tracks = tracks;
 	    }
-	    Playlist.makeFromJson = function (accessToken, data) {
+	    Playlist.makeFromJson = function (accessToken, playlistRaw, filesRaw) {
 	        var tracks = {};
-	        for (var _i = 0, data_1 = data; _i < data_1.length; _i++) {
-	            var record = data_1[_i];
-	            var id = record['id'];
-	            var fileId = record['file'];
-	            var cueInAt = new Date(record['cue_in_at']);
-	            var cueOutAt = new Date(record['cue_out_at']);
-	            var cueOffset = record['cue_offset'];
-	            var fadeInAt = record['fade_in_at'] !== null ? new Date(record['fade_in_at']) : null;
-	            var fadeOutAt = record['fade_out_at'] !== null ? new Date(record['fade_out_at']) : null;
-	            var track = new Track_1.Track(accessToken, id, fileId, cueInAt, cueOutAt, cueOffset, fadeInAt, fadeOutAt);
+	        for (var _i = 0, playlistRaw_1 = playlistRaw; _i < playlistRaw_1.length; _i++) {
+	            var playlistRecord = playlistRaw_1[_i];
+	            var id = playlistRecord['id'];
+	            var fileId = playlistRecord['file'];
+	            var fileUrl = void 0;
+	            for (var _a = 0, filesRaw_1 = filesRaw; _a < filesRaw_1.length; _a++) {
+	                var fileRecord = filesRaw_1[_a];
+	                if (fileRecord['id'] === playlistRecord['file']) {
+	                    fileUrl = fileRecord['public_url'];
+	                    break;
+	                }
+	            }
+	            var cueInAt = new Date(playlistRecord['cue_in_at']);
+	            var cueOutAt = new Date(playlistRecord['cue_out_at']);
+	            var cueOffset = playlistRecord['cue_offset'];
+	            var fadeInAt = playlistRecord['fade_in_at'] !== null ? new Date(playlistRecord['fade_in_at']) : null;
+	            var fadeOutAt = playlistRecord['fade_out_at'] !== null ? new Date(playlistRecord['fade_out_at']) : null;
+	            var track = new Track_1.Track(accessToken, id, fileId, fileUrl, cueInAt, cueOutAt, cueOffset, fadeInAt, fadeOutAt);
 	            tracks[id] = track;
 	        }
 	        return new Playlist(tracks);
@@ -437,7 +527,7 @@
 
 
 /***/ },
-/* 6 */
+/* 7 */
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
@@ -447,25 +537,30 @@
 	    d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
 	};
 	var Base_1 = __webpack_require__(2);
-	var TrackInfo_1 = __webpack_require__(7);
+	var TrackInfo_1 = __webpack_require__(8);
 	var Track = (function (_super) {
 	    __extends(Track, _super);
-	    function Track(accessToken, id, fileId, cueInAt, cueOutAt, cueOffset, fadeInAt, fadeOutAt) {
-	        _super.call(this);
-	        this.__accessToken = accessToken;
-	        this.__id = id;
-	        this.__fileId = fileId;
-	        this.__cueInAt = cueInAt;
-	        this.__cueOutAt = cueOutAt;
-	        this.__cueOffset = cueOffset;
-	        this.__fadeInAt = fadeInAt;
-	        this.__fadeOutAt = fadeOutAt;
+	    function Track(accessToken, id, fileId, fileUrl, cueInAt, cueOutAt, cueOffset, fadeInAt, fadeOutAt) {
+	        var _this = _super.call(this) || this;
+	        _this.__accessToken = accessToken;
+	        _this.__id = id;
+	        _this.__fileId = fileId;
+	        _this.__fileUrl = fileUrl;
+	        _this.__cueInAt = cueInAt;
+	        _this.__cueOutAt = cueOutAt;
+	        _this.__cueOffset = cueOffset;
+	        _this.__fadeInAt = fadeInAt;
+	        _this.__fadeOutAt = fadeOutAt;
+	        return _this;
 	    }
 	    Track.prototype.getId = function () {
 	        return this.__id;
 	    };
 	    Track.prototype.getFileId = function () {
 	        return this.__fileId;
+	    };
+	    Track.prototype.getFileUrl = function () {
+	        return this.__fileUrl;
 	    };
 	    Track.prototype.getCueInAt = function () {
 	        return this.__cueInAt;
@@ -499,7 +594,7 @@
 	                '&a[]=affiliate_schemas.kind' +
 	                '&a[]=affiliate_items.id' +
 	                '&a[]=affiliate_items.affiliate_schema_id' +
-	                '&a[]=affiliate_items.affiliate_metadata' +
+	                '&a[]=affiliate_items.item_url' +
 	                '&a[]=metadata_schemas.id' +
 	                '&a[]=metadata_schemas.name' +
 	                '&a[]=metadata_schemas.key' +
@@ -529,13 +624,13 @@
 	            xhr.setRequestHeader('Accept', 'application/json');
 	            xhr.timeout = 15000;
 	            xhr.onerror = function (e) {
-	                reject(new Error("Unable to fetch playlist: Network error (" + xhr.status + ")"));
+	                reject(new Error("Unable to fetch track info: Network error (" + xhr.status + ")"));
 	            };
 	            xhr.onabort = function (e) {
-	                reject(new Error("Unable to fetch playlist: Aborted"));
+	                reject(new Error("Unable to fetch track info: Aborted"));
 	            };
 	            xhr.ontimeout = function (e) {
-	                reject(new Error("Unable to fetch playlist: Timeout"));
+	                reject(new Error("Unable to fetch track info: Timeout"));
 	            };
 	            xhr.onreadystatechange = function () {
 	                if (xhr.readyState === 4) {
@@ -566,10 +661,11 @@
 
 
 /***/ },
-/* 7 */
-/***/ function(module, exports) {
+/* 8 */
+/***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+	var AffiliateInfo_1 = __webpack_require__(9);
 	var TrackInfo = (function () {
 	    function TrackInfo(name, metadata, affiliates) {
 	        this.__name = name;
@@ -594,13 +690,13 @@
 	            var metadataItem = _e[_d];
 	            var key = metadataSchemas[metadataItem['metadata_schema_id']].key;
 	            var kind = metadataSchemas[metadataItem['metadata_schema_id']].kind;
-	            var value = metadataItem[("value_" + kind)];
+	            var value = metadataItem["value_" + kind];
 	            metadata[key] = value;
 	        }
 	        for (var _f = 0, _g = data['affiliate_items']; _f < _g.length; _f++) {
 	            var affiliateItem = _g[_f];
 	            var key = affiliateSchemas[affiliateItem['affiliate_schema_id']].key;
-	            var value = affiliateItem['affiliate_metadata'];
+	            var value = new AffiliateInfo_1.AffiliateInfo(affiliateItem);
 	            affiliates[key] = value;
 	        }
 	        return new TrackInfo(name, metadata, affiliates);
@@ -620,7 +716,27 @@
 
 
 /***/ },
-/* 8 */
+/* 9 */
+/***/ function(module, exports) {
+
+	"use strict";
+	var AffiliateInfo = (function () {
+	    function AffiliateInfo(affiliateItem) {
+	        this.__affiliateItem = affiliateItem;
+	    }
+	    AffiliateInfo.prototype.hasItem = function () {
+	        return this.__affiliateItem['item_url'] !== null;
+	    };
+	    AffiliateInfo.prototype.getItemUrl = function () {
+	        return this.__affiliateItem['item_url'];
+	    };
+	    return AffiliateInfo;
+	}());
+	exports.AffiliateInfo = AffiliateInfo;
+
+
+/***/ },
+/* 10 */
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
@@ -629,14 +745,15 @@
 	    function __() { this.constructor = d; }
 	    d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
 	};
-	var Factory_1 = __webpack_require__(9);
+	var Factory_1 = __webpack_require__(11);
 	var Base_1 = __webpack_require__(2);
 	var AudioManager = (function (_super) {
 	    __extends(AudioManager, _super);
 	    function AudioManager() {
-	        _super.apply(this, arguments);
-	        this.__audioPlayers = {};
-	        this.__volume = 1.0;
+	        var _this = _super !== null && _super.apply(this, arguments) || this;
+	        _this.__audioPlayers = {};
+	        _this.__volume = 1.0;
+	        return _this;
 	    }
 	    AudioManager.prototype.update = function (playlist, clock) {
 	        var tracks = playlist.getTracks();
@@ -710,11 +827,11 @@
 
 
 /***/ },
-/* 9 */
+/* 11 */
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
-	var HTMLPlayer_1 = __webpack_require__(10);
+	var HTMLPlayer_1 = __webpack_require__(12);
 	var Factory = (function () {
 	    function Factory() {
 	    }
@@ -727,7 +844,7 @@
 
 
 /***/ },
-/* 10 */
+/* 12 */
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
@@ -740,14 +857,15 @@
 	var HTMLPlayer = (function (_super) {
 	    __extends(HTMLPlayer, _super);
 	    function HTMLPlayer(track, clock) {
-	        _super.call(this);
-	        this.__started = false;
-	        this.__cueInTimeoutId = 0;
-	        this.__restartTimeoutId = 0;
-	        this.__positionIntervalId = 0;
-	        this.__volume = 1.0;
-	        this.__track = track;
-	        this.__clock = clock;
+	        var _this = _super.call(this) || this;
+	        _this.__started = false;
+	        _this.__cueInTimeoutId = 0;
+	        _this.__restartTimeoutId = 0;
+	        _this.__positionIntervalId = 0;
+	        _this.__volume = 1.0;
+	        _this.__track = track;
+	        _this.__clock = clock;
+	        return _this;
 	    }
 	    HTMLPlayer.prototype.start = function () {
 	        if (!this.__started) {
@@ -787,14 +905,13 @@
 	    HTMLPlayer.prototype._loggerTag = function () {
 	        return this['constructor']['name'] + " " + this.__track.getId();
 	    };
-	    HTMLPlayer.prototype.__onAudioLoadedMetadata = function (e) {
-	        this.debug('Loaded metadata');
-	        this.__audio.onloadedmetadata = undefined;
+	    HTMLPlayer.prototype.__onAudioCanPlayThroughWhenPreparing = function (e) {
+	        this.debug('Can play through (when preparing)');
 	        var now = this.__clock.nowAsTimestamp();
 	        var cueInAt = this.__track.getCueInAt().valueOf();
 	        var cueOutAt = this.__track.getCueOutAt().valueOf();
 	        if (now >= cueOutAt) {
-	            this.debug('Track is obsolete');
+	            this.warn('Unable to play: Track is obsolete');
 	        }
 	        else {
 	            if (now < cueInAt) {
@@ -803,15 +920,19 @@
 	                this.__cueInTimeoutId = setTimeout(this.__onCueInTimeout.bind(this), timeout);
 	            }
 	            else if (now > cueInAt) {
+	                this.__audio.oncanplaythrough = this.__onAudioCanPlayThroughWhenReady.bind(this);
 	                var position = now - cueInAt;
 	                this.debug("Seeking to " + position + " ms");
 	                this.__audio.currentTime = position / 1000.0;
-	                this.__startPlayback();
 	            }
 	            else {
 	                this.__startPlayback();
 	            }
 	        }
+	    };
+	    HTMLPlayer.prototype.__onAudioCanPlayThroughWhenReady = function (e) {
+	        this.debug('Can play through (when ready)');
+	        this.__startPlayback();
 	    };
 	    HTMLPlayer.prototype.__onAudioError = function (e) {
 	        this.warn('Error');
@@ -821,6 +942,12 @@
 	    HTMLPlayer.prototype.__onAudioEnded = function (e) {
 	        this.debug('EOS');
 	        this.__stopPlayback();
+	    };
+	    HTMLPlayer.prototype.__onAudioSeeking = function (e) {
+	        this.debug('Seeking');
+	    };
+	    HTMLPlayer.prototype.__onAudioSeeked = function (e) {
+	        this.debug('Seeked');
 	    };
 	    HTMLPlayer.prototype.__onAudioWaiting = function (e) {
 	        this.warn('Waiting');
@@ -834,24 +961,35 @@
 	    HTMLPlayer.prototype.__onCueInTimeout = function () {
 	        this.debug('Cue In timeout has passed');
 	        this.__cueInTimeoutId = 0;
-	        this.__preparePlayback();
+	        this.__startPlayback();
 	    };
 	    HTMLPlayer.prototype.__preparePlayback = function () {
 	        this.debug('Preparing playback');
 	        this.__audio = new Audio();
 	        this.__audio.volume = this.__volume;
-	        this.__audio.onloadedmetadata = this.__onAudioLoadedMetadata.bind(this);
-	        this.__audio.onerror = this.__onAudioError.bind(this);
-	        this.__audio.onended = this.__onAudioEnded.bind(this);
-	        if (this.__audio.canPlayType('application/ogg; codecs=opus')) {
-	            this.__audio.src = "https://essence.radiokitapp.org/api/cdn/v1.0/vault/file/" + this.__track.getFileId() + "/variant/webbrowser-opus";
-	        }
-	        else if (this.__audio.canPlayType('audio/mpeg')) {
-	            this.__audio.src = "https://essence.radiokitapp.org/api/cdn/v1.0/vault/file/" + this.__track.getFileId() + "/variant/webbrowser-mp3";
+	        this.__audio.preload = 'none';
+	        this.__audio.src = this.__track.getFileUrl();
+	        var now = this.__clock.nowAsTimestamp();
+	        var cueInAt = this.__track.getCueInAt().valueOf();
+	        var cueOutAt = this.__track.getCueOutAt().valueOf();
+	        if (now >= cueOutAt) {
+	            this.warn('Unable to set initial currentTime: Track is obsolete');
 	        }
 	        else {
-	            throw new Error('Browser supports none of formats server can send.');
+	            if (now <= cueInAt) {
+	                this.__audio.currentTime = 0;
+	            }
+	            else {
+	                var position = now - cueInAt;
+	                this.debug("Setting initial currentTime to " + position + " ms");
+	                this.__audio.onseeking = this.__onAudioSeeking.bind(this);
+	                this.__audio.onseeked = this.__onAudioSeeked.bind(this);
+	                this.__audio.currentTime = position / 1000.0;
+	            }
 	        }
+	        this.__audio.oncanplaythrough = this.__onAudioCanPlayThroughWhenPreparing.bind(this);
+	        this.__audio.onerror = this.__onAudioError.bind(this);
+	        this.__audio.load();
 	    };
 	    HTMLPlayer.prototype.__startPlayback = function () {
 	        this.debug('Starting playback');
@@ -859,19 +997,25 @@
 	        this.__audio.onwaiting = this.__onAudioWaiting.bind(this);
 	        this.__audio.onstalled = this.__onAudioStalled.bind(this);
 	        this.__audio.onsuspend = this.__onAudioSuspended.bind(this);
+	        this.__audio.onended = this.__onAudioEnded.bind(this);
 	        this.__audio.play();
 	        this._trigger('playback-started', this.__track);
 	    };
 	    HTMLPlayer.prototype.__stopPlayback = function () {
 	        this.debug('Stopping playback');
 	        if (this.__audio) {
-	            this.__audio.onloadedmetadata = undefined;
+	            this.__audio.oncanplaythrough = undefined;
 	            this.__audio.onerror = undefined;
 	            this.__audio.onended = undefined;
 	            this.__audio.onwaiting = undefined;
 	            this.__audio.onstalled = undefined;
 	            this.__audio.onsuspend = undefined;
-	            this.__audio.pause();
+	            this.__audio.onseeking = undefined;
+	            this.__audio.onseeked = undefined;
+	            if (this.__audio.readyState == 4) {
+	                this.__audio.pause();
+	            }
+	            this.__audio.src = '';
 	            delete this.__audio;
 	            this.__audio = undefined;
 	        }
@@ -900,11 +1044,13 @@
 	        }
 	    };
 	    HTMLPlayer.prototype.__onPositionInterval = function () {
-	        var position = Math.round(this.__audio.currentTime * 1000);
-	        var cueInAt = this.__track.getCueInAt().valueOf();
-	        var cueOutAt = this.__track.getCueOutAt().valueOf();
-	        var duration = cueOutAt - cueInAt;
-	        this._trigger('position', this.__track, position, duration);
+	        if (this.__audio) {
+	            var position = Math.round(this.__audio.currentTime * 1000);
+	            var cueInAt = this.__track.getCueInAt().valueOf();
+	            var cueOutAt = this.__track.getCueOutAt().valueOf();
+	            var duration = cueOutAt - cueInAt;
+	            this._trigger('position', this.__track, position, duration);
+	        }
 	    };
 	    return HTMLPlayer;
 	}(Base_1.Base));

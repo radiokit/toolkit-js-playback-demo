@@ -812,11 +812,20 @@
 	        }
 	        return result;
 	    };
-	    AudioManager.prototype.__onAudioPlayerPlaybackStarted = function (track) {
-	        this.__currentTrack = track;
-	        this._trigger('playback-started', track);
+	    AudioManager.prototype.__onAudioPlayerPlaybackStarted = function (audioPlayer) {
+	        this.__currentTrack = audioPlayer.getTrack();
+	        this._trigger('playback-started', this.__currentTrack);
+	        for (var id in this.__audioPlayers) {
+	            var iteratedAudioPlayer = this.__audioPlayers[id];
+	            var iteratedTrack = iteratedAudioPlayer.getTrack();
+	            if (iteratedAudioPlayer !== audioPlayer && iteratedTrack.getCueInAt() <= this.__currentTrack.getCueInAt()) {
+	                this.debug("Applying fade out to player " + iteratedAudioPlayer.getTrack().getId() + " so it does not overlap with player " + audioPlayer.getTrack().getId());
+	                iteratedAudioPlayer.fadeOut(1000);
+	            }
+	        }
 	    };
-	    AudioManager.prototype.__onAudioPlayerPosition = function (track, position, duration) {
+	    AudioManager.prototype.__onAudioPlayerPosition = function (audioPlayer, position, duration) {
+	        var track = audioPlayer.getTrack();
 	        if (track === this.__currentTrack) {
 	            this._trigger('position', track, position, duration);
 	        }
@@ -854,6 +863,7 @@
 	    d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
 	};
 	var Base_1 = __webpack_require__(2);
+	var FADE_OUT_INTERVAL = 25;
 	var HTMLPlayer = (function (_super) {
 	    __extends(HTMLPlayer, _super);
 	    function HTMLPlayer(track, clock) {
@@ -863,6 +873,8 @@
 	        _this.__restartTimeoutId = 0;
 	        _this.__positionIntervalId = 0;
 	        _this.__volume = 1.0;
+	        _this.__fadeVolumeMultiplier = 1.0;
+	        _this.__fadeIntervalId = 0;
 	        _this.__track = track;
 	        _this.__clock = clock;
 	        return _this;
@@ -895,12 +907,33 @@
 	        }
 	        this.__volume = volume;
 	        if (this.__audio) {
-	            this.__audio.volume = volume;
+	            this.__audio.volume = volume * this.__fadeVolumeMultiplier;
 	        }
 	        return this;
 	    };
 	    HTMLPlayer.prototype.getTrack = function () {
 	        return this.__track;
+	    };
+	    HTMLPlayer.prototype.fadeOut = function (duration) {
+	        var _this = this;
+	        if (this.__fadeIntervalId === 0) {
+	            this.debug("Starting fade out of duration " + duration + " ms");
+	            var step_1 = FADE_OUT_INTERVAL / duration;
+	            this.__fadeIntervalId = setInterval(function () {
+	                _this.__fadeVolumeMultiplier -= step_1;
+	                if (_this.__fadeVolumeMultiplier <= 0) {
+	                    _this.__fadeVolumeMultiplier = 0;
+	                    clearInterval(_this.__fadeIntervalId);
+	                    _this.__fadeIntervalId = 0;
+	                    _this.debug("Finishing fade out");
+	                }
+	                _this.debug("Fade out: " + _this.__fadeVolumeMultiplier + "%");
+	                if (_this.__audio) {
+	                    _this.__audio.volume = _this.__volume * _this.__fadeVolumeMultiplier;
+	                }
+	            }, FADE_OUT_INTERVAL);
+	        }
+	        return this;
 	    };
 	    HTMLPlayer.prototype._loggerTag = function () {
 	        return this['constructor']['name'] + " " + this.__track.getId();
@@ -965,6 +998,7 @@
 	    };
 	    HTMLPlayer.prototype.__preparePlayback = function () {
 	        this.debug('Preparing playback');
+	        this.__fadeVolumeMultiplier = 1.0;
 	        this.__audio = new Audio();
 	        this.__audio.volume = this.__volume;
 	        this.__audio.preload = 'none';
@@ -999,7 +1033,7 @@
 	        this.__audio.onsuspend = this.__onAudioSuspended.bind(this);
 	        this.__audio.onended = this.__onAudioEnded.bind(this);
 	        this.__audio.play();
-	        this._trigger('playback-started', this.__track);
+	        this._trigger('playback-started', this);
 	    };
 	    HTMLPlayer.prototype.__stopPlayback = function () {
 	        this.debug('Stopping playback');
@@ -1018,6 +1052,10 @@
 	            this.__audio.src = '';
 	            delete this.__audio;
 	            this.__audio = undefined;
+	        }
+	        if (this.__fadeIntervalId !== 0) {
+	            clearInterval(this.__fadeIntervalId);
+	            this.__fadeIntervalId = 0;
 	        }
 	        if (this.__cueInTimeoutId !== 0) {
 	            clearTimeout(this.__cueInTimeoutId);
@@ -1049,7 +1087,7 @@
 	            var cueInAt = this.__track.getCueInAt().valueOf();
 	            var cueOutAt = this.__track.getCueOutAt().valueOf();
 	            var duration = cueOutAt - cueInAt;
-	            this._trigger('position', this.__track, position, duration);
+	            this._trigger('position', this, position, duration);
 	        }
 	    };
 	    return HTMLPlayer;

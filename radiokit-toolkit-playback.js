@@ -68,18 +68,31 @@
 	    function __() { this.constructor = d; }
 	    d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
 	};
+	var __assign = (this && this.__assign) || Object.assign || function(t) {
+	    for (var s, i = 1, n = arguments.length; i < n; i++) {
+	        s = arguments[i];
+	        for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
+	            t[p] = s[p];
+	    }
+	    return t;
+	};
 	var Base_1 = __webpack_require__(2);
 	var SyncClock_1 = __webpack_require__(3);
 	var PlaylistFetcher_1 = __webpack_require__(4);
-	var AudioManager_1 = __webpack_require__(10);
+	var AudioManager_1 = __webpack_require__(9);
 	var Player = (function (_super) {
 	    __extends(Player, _super);
-	    function Player(channelId, accessToken) {
+	    function Player(channelId, accessToken, options) {
+	        if (options === void 0) { options = {}; }
 	        var _this = _super.call(this) || this;
 	        _this.__fetchTimeoutId = 0;
+	        _this.__playlist = null;
 	        _this.__clock = null;
+	        _this.__fetching = false;
 	        _this.__playlistFetcher = null;
 	        _this.__volume = 1.0;
+	        _this.__options = { from: 20, to: 600 };
+	        _this.__options = __assign({}, _this.__options, options);
 	        _this.__started = false;
 	        _this.__channelId = channelId;
 	        _this.__accessToken = accessToken;
@@ -95,7 +108,6 @@
 	        return this;
 	    };
 	    Player.prototype.stop = function () {
-	        this.__stopFetching();
 	        this.__started = false;
 	        if (this.__audioManager) {
 	            this.__audioManager.offAll();
@@ -122,16 +134,24 @@
 	    Player.prototype.isStarted = function () {
 	        return this.__started;
 	    };
+	    Player.prototype.fetchPlaylist = function () {
+	        this.__startFetching();
+	        return this;
+	    };
+	    Player.prototype.stopFetching = function () {
+	        this.__fetching = false;
+	        if (this.__fetchTimeoutId !== 0) {
+	            clearTimeout(this.__fetchTimeoutId);
+	            this.__fetchTimeoutId = 0;
+	        }
+	    };
 	    Player.prototype._loggerTag = function () {
 	        return this['constructor']['name'] + " " + this.__channelId;
 	    };
 	    Player.prototype.__startFetching = function () {
-	        this.__fetchOnceAndRepeat();
-	    };
-	    Player.prototype.__stopFetching = function () {
-	        if (this.__fetchTimeoutId !== 0) {
-	            clearTimeout(this.__fetchTimeoutId);
-	            this.__fetchTimeoutId = 0;
+	        if (!this.__fetching) {
+	            this.__fetching = true;
+	            this.__fetchOnceAndRepeat();
 	        }
 	    };
 	    Player.prototype.__fetchOnce = function () {
@@ -143,7 +163,7 @@
 	                    .then(function (clock) {
 	                    _this.debug("Fetch: Synchronized clock");
 	                    _this.__clock = clock;
-	                    _this.__playlistFetcher = new PlaylistFetcher_1.PlaylistFetcher(_this.__accessToken, _this.__channelId, clock);
+	                    _this.__playlistFetcher = new PlaylistFetcher_1.PlaylistFetcher(_this.__accessToken, _this.__channelId, clock, { from: _this.__options.from, to: _this.__options.to });
 	                    return _this.__fetchPlaylist(resolve, reject);
 	                })
 	                    .catch(function (error) {
@@ -179,9 +199,9 @@
 	        var _this = this;
 	        this.__fetchOnce()
 	            .then(function (playlist) {
-	            if (_this.__started) {
-	                _this.__audioManager.update(playlist, _this.__clock);
-	            }
+	            _this.__playlist = playlist;
+	            _this.__onPlayListFetched(playlist);
+	            _this.__started && _this.__audioManager.update(_this.__playlist, _this.__clock);
 	            _this.__scheduleNextFetch();
 	        })
 	            .catch(function (error) {
@@ -190,7 +210,7 @@
 	    };
 	    Player.prototype.__scheduleNextFetch = function () {
 	        var _this = this;
-	        if (this.__started) {
+	        if (this.__fetching) {
 	            var timeout = 2000 + Math.round(Math.random() * 250);
 	            this.debug("Fetch: Scheduling next fetch in " + timeout + " ms");
 	            this.__fetchTimeoutId = setTimeout(function () {
@@ -198,6 +218,9 @@
 	                _this.__fetchOnceAndRepeat();
 	            }, timeout);
 	        }
+	    };
+	    Player.prototype.__onPlayListFetched = function (playlist) {
+	        this._trigger('playlist-fetched', playlist);
 	    };
 	    Player.prototype.__onAudioManagerPosition = function (track, position, duration) {
 	        this._trigger('track-position', track, position, duration);
@@ -348,9 +371,20 @@
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+	var __assign = (this && this.__assign) || Object.assign || function(t) {
+	    for (var s, i = 1, n = arguments.length; i < n; i++) {
+	        s = arguments[i];
+	        for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
+	            t[p] = s[p];
+	    }
+	    return t;
+	};
 	var PlaylistResolver_1 = __webpack_require__(5);
 	var PlaylistFetcher = (function () {
-	    function PlaylistFetcher(accessToken, channelId, clock) {
+	    function PlaylistFetcher(accessToken, channelId, clock, options) {
+	        if (options === void 0) { options = {}; }
+	        this.__options = { from: 20, to: 600 };
+	        this.__options = __assign({}, this.__options, options);
 	        this.__clock = clock;
 	        this.__channelId = channelId;
 	        this.__accessToken = accessToken;
@@ -369,7 +403,8 @@
 	                '&a[]=cue_offset' +
 	                '&a[]=fade_in_at' +
 	                '&a[]=fade_out_at' +
-	                '&s[]=cue%20' + encodeURIComponent(new Date(now).toISOString()) + '%2020%20600' +
+	                '&s[]=cue%20' + encodeURIComponent(new Date(now).toISOString()) +
+	                encodeURIComponent(" " + _this.__options.from + " " + _this.__options.to) +
 	                '&c[references][]=deq%20broadcast_channel_id%20' + encodeURIComponent(_this.__channelId) +
 	                '&o[]=cue_in_at%20asc';
 	            xhr.open('GET', url, true);
@@ -588,13 +623,6 @@
 	                '&a[]=references' +
 	                '&a[]=extra' +
 	                '&a[]=public_url' +
-	                '&a[]=affiliate_schemas.id' +
-	                '&a[]=affiliate_schemas.name' +
-	                '&a[]=affiliate_schemas.key' +
-	                '&a[]=affiliate_schemas.kind' +
-	                '&a[]=affiliate_items.id' +
-	                '&a[]=affiliate_items.affiliate_schema_id' +
-	                '&a[]=affiliate_items.item_url' +
 	                '&a[]=metadata_schemas.id' +
 	                '&a[]=metadata_schemas.name' +
 	                '&a[]=metadata_schemas.key' +
@@ -616,8 +644,6 @@
 	                '&a[]=metadata_items.value_url' +
 	                '&j[]=metadata_schemas' +
 	                '&j[]=metadata_items' +
-	                '&j[]=affiliate_schemas' +
-	                '&j[]=affiliate_items' +
 	                '&c[id][]=eq%20' + encodeURIComponent(_this.__fileId);
 	            xhr.open('GET', url, true);
 	            xhr.setRequestHeader('Authorization', "Bearer " + _this.__accessToken);
@@ -662,53 +688,36 @@
 
 /***/ },
 /* 8 */
-/***/ function(module, exports, __webpack_require__) {
+/***/ function(module, exports) {
 
 	"use strict";
-	var AffiliateInfo_1 = __webpack_require__(9);
 	var TrackInfo = (function () {
-	    function TrackInfo(name, metadata, affiliates) {
+	    function TrackInfo(name, metadata) {
 	        this.__name = name;
 	        this.__metadata = metadata;
-	        this.__affiliates = affiliates;
 	    }
 	    TrackInfo.makeFromJson = function (data) {
 	        var name = data['name'];
 	        var metadata = {};
-	        var affiliates = {};
 	        var metadataSchemas = {};
 	        for (var _i = 0, _a = data['metadata_schemas']; _i < _a.length; _i++) {
 	            var metadataSchema = _a[_i];
 	            metadataSchemas[metadataSchema['id']] = metadataSchema;
 	        }
-	        var affiliateSchemas = {};
-	        for (var _b = 0, _c = data['affiliate_schemas']; _b < _c.length; _b++) {
-	            var affiliateSchema = _c[_b];
-	            affiliateSchemas[affiliateSchema['id']] = affiliateSchema;
-	        }
-	        for (var _d = 0, _e = data['metadata_items']; _d < _e.length; _d++) {
-	            var metadataItem = _e[_d];
+	        for (var _b = 0, _c = data['metadata_items']; _b < _c.length; _b++) {
+	            var metadataItem = _c[_b];
 	            var key = metadataSchemas[metadataItem['metadata_schema_id']].key;
 	            var kind = metadataSchemas[metadataItem['metadata_schema_id']].kind;
 	            var value = metadataItem["value_" + kind];
 	            metadata[key] = value;
 	        }
-	        for (var _f = 0, _g = data['affiliate_items']; _f < _g.length; _f++) {
-	            var affiliateItem = _g[_f];
-	            var key = affiliateSchemas[affiliateItem['affiliate_schema_id']].key;
-	            var value = new AffiliateInfo_1.AffiliateInfo(affiliateItem);
-	            affiliates[key] = value;
-	        }
-	        return new TrackInfo(name, metadata, affiliates);
+	        return new TrackInfo(name, metadata);
 	    };
 	    TrackInfo.prototype.getName = function () {
 	        return this.__name;
 	    };
 	    TrackInfo.prototype.getMetadata = function () {
 	        return this.__metadata;
-	    };
-	    TrackInfo.prototype.getAffiliates = function () {
-	        return this.__affiliates;
 	    };
 	    return TrackInfo;
 	}());
@@ -717,26 +726,6 @@
 
 /***/ },
 /* 9 */
-/***/ function(module, exports) {
-
-	"use strict";
-	var AffiliateInfo = (function () {
-	    function AffiliateInfo(affiliateItem) {
-	        this.__affiliateItem = affiliateItem;
-	    }
-	    AffiliateInfo.prototype.hasItem = function () {
-	        return this.__affiliateItem['item_url'] !== null;
-	    };
-	    AffiliateInfo.prototype.getItemUrl = function () {
-	        return this.__affiliateItem['item_url'];
-	    };
-	    return AffiliateInfo;
-	}());
-	exports.AffiliateInfo = AffiliateInfo;
-
-
-/***/ },
-/* 10 */
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
@@ -745,7 +734,7 @@
 	    function __() { this.constructor = d; }
 	    d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
 	};
-	var Factory_1 = __webpack_require__(11);
+	var Factory_1 = __webpack_require__(10);
 	var Base_1 = __webpack_require__(2);
 	var AudioManager = (function (_super) {
 	    __extends(AudioManager, _super);
@@ -819,7 +808,7 @@
 	            var iteratedAudioPlayer = this.__audioPlayers[id];
 	            var iteratedTrack = iteratedAudioPlayer.getTrack();
 	            if (iteratedAudioPlayer !== audioPlayer && iteratedTrack.getCueInAt() <= this.__currentTrack.getCueInAt()) {
-	                this.debug("Applying fade out to player " + iteratedAudioPlayer.getTrack().getId() + " so it does not overlap with player " + audioPlayer.getTrack().getId());
+	                this.debug("Applying fade out to player for track " + iteratedAudioPlayer.getTrack().getId() + " so it does not overlap with player for track " + audioPlayer.getTrack().getId());
 	                iteratedAudioPlayer.fadeOut(1000);
 	            }
 	        }
@@ -836,11 +825,11 @@
 
 
 /***/ },
-/* 11 */
+/* 10 */
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
-	var HTMLPlayer_1 = __webpack_require__(12);
+	var HTMLPlayer_1 = __webpack_require__(11);
 	var Factory = (function () {
 	    function Factory() {
 	    }
@@ -853,7 +842,7 @@
 
 
 /***/ },
-/* 12 */
+/* 11 */
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";

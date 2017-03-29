@@ -27,17 +27,6 @@
           metadataText += '</ul>';
 
           document.getElementById('track-metadata').innerHTML = metadataText;
-
-          // Affiliates
-          var affiliatesInfo = trackInfo.getAffiliates();
-          var affiliatesText = 'AFFILIATES:<ul>';
-          affiliatesKeys = Object.keys(affiliatesInfo);
-          for(var i = 0; i < affiliatesKeys.length; i++) {
-            affiliatesText += '<li><b>' + affiliatesKeys[i] + '</b>: ' + JSON.stringify(affiliatesInfo[affiliatesKeys[i]]) + '</li>';
-          }
-          affiliatesText += '</ul>';
-
-          document.getElementById('track-affiliates').innerHTML = affiliatesText;
         })
         .catch(function(reason) {
           throw reason;
@@ -45,6 +34,15 @@
     });
     window.player.on('track-position', function(track, position, duration) {
       document.getElementById('track-position').innerHTML = 'POSITION: ' + position + ' / ' + duration + ' ms';
+    });
+
+    window.player.on('playlist-fetched', function(playlist) {
+      var tracks = Object.keys(playlist.getTracks());
+      var tracksHTML = "<div>PLAY LIST:</div><br />";
+      for (var i = 0; i < tracks.length; i++) {
+        tracksHTML += "<div>" + tracks[i] + "</div>";
+      }
+      document.getElementById('playlist').innerHTML = tracksHTML;
     });
   }
 
@@ -61,6 +59,10 @@
     }
   }
 
+  function fetchPlaylist() {
+    window.player.fetchPlaylist();
+  }
+
 
   function setVolume(volume) {
     window.player.setVolume(volume);
@@ -71,8 +73,10 @@
 <body onload="init()" style="text-align: center">
   <button onclick="toggle()" id="button" style="width: 400px; height: 200px; font-size: 24pt">PLAY</button>
 
-  <br><br>
+  <br /><br />
+  <button onclick="fetchPlaylist()" style="width: 97px; height: 50px; font-size: 11pt">FETCH PLAYLIST</button>
 
+  <br /><br />
   <button onclick="setVolume(0.25)" style="width: 97px; height: 50px; font-size: 11pt">VOL 25%</button>
   <button onclick="setVolume(0.50)" style="width: 97px; height: 50px; font-size: 11pt">VOL 50%</button>
   <button onclick="setVolume(0.75)" style="width: 97px; height: 50px; font-size: 11pt">VOL 75%</button>
@@ -96,7 +100,7 @@
 
   <br>
 
-  <div id="track-affiliates" style="width: 400px; text-align: left; margin: 0 auto"></div>
+  <div id="playlist" style="width: 400px; text-align: left; margin: 0 auto"></div>
 
 </body>
 </html>

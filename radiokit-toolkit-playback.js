@@ -80,12 +80,14 @@
 	var SyncClock_1 = __webpack_require__(3);
 	var PlaylistFetcher_1 = __webpack_require__(4);
 	var AudioManager_1 = __webpack_require__(9);
+	var StreamManager_1 = __webpack_require__(12);
 	var Player = (function (_super) {
 	    __extends(Player, _super);
 	    function Player(channelId, accessToken, options) {
 	        if (options === void 0) { options = {}; }
 	        var _this = _super.call(this) || this;
 	        _this.__fetchTimeoutId = 0;
+	        _this.__playbackStartedEmitted = false;
 	        _this.__playlist = null;
 	        _this.__clock = null;
 	        _this.__fetching = false;
@@ -99,23 +101,44 @@
 	        return _this;
 	    }
 	    Player.prototype.start = function () {
-	        this.__startFetching();
-	        this.__started = true;
-	        this.__audioManager = new AudioManager_1.AudioManager();
-	        this.__audioManager.setVolume(this.__volume);
-	        this.__audioManager.on('playback-started', this.__onAudioManagerPlaybackStarted.bind(this));
-	        this.__audioManager.on('position', this.__onAudioManagerPosition.bind(this));
+	        if (!this.__started) {
+	            this.__startFetching();
+	            this.__started = true;
+	            this.__playbackStartedEmitted = false;
+	            if (this.__supportsAudioManager()) {
+	                this.debug("Using AudioManager");
+	                this.__audioManager = new AudioManager_1.AudioManager();
+	                this.__audioManager.setVolume(this.__volume);
+	                this.__audioManager.on('playback-started', this.__onAudioManagerPlaybackStarted.bind(this));
+	                this.__audioManager.on('position', this.__onAudioManagerPosition.bind(this));
+	            }
+	            else {
+	                this.debug("Using StreamManager");
+	                this.__streamManager = new StreamManager_1.StreamManager(this.__channelId);
+	                this.__streamManager.setVolume(this.__volume);
+	                this.__streamManager.on('playback-started', this.__onStreamManagerPlaybackStarted.bind(this));
+	                this.__streamManager.start();
+	            }
+	        }
 	        return this;
 	    };
 	    Player.prototype.stop = function () {
-	        this.__started = false;
-	        if (this.__audioManager) {
-	            this.__audioManager.offAll();
-	            this.__audioManager.cleanup();
-	            delete this.__audioManager;
-	            this.__audioManager = undefined;
+	        if (this.__started) {
+	            this.__started = false;
+	            if (this.__audioManager) {
+	                this.__audioManager.offAll();
+	                this.__audioManager.cleanup();
+	                delete this.__audioManager;
+	                this.__audioManager = undefined;
+	            }
+	            else if (this.__streamManager) {
+	                this.__streamManager.offAll();
+	                this.__streamManager.stop();
+	                delete this.__streamManager;
+	                this.__streamManager = undefined;
+	            }
+	            return this;
 	        }
-	        return this;
 	    };
 	    Player.prototype.setVolume = function (volume) {
 	        if (volume < 0.0 || volume > 1.0) {
@@ -139,14 +162,30 @@
 	        return this;
 	    };
 	    Player.prototype.stopFetching = function () {
-	        this.__fetching = false;
-	        if (this.__fetchTimeoutId !== 0) {
-	            clearTimeout(this.__fetchTimeoutId);
-	            this.__fetchTimeoutId = 0;
+	        if (this.__fetching) {
+	            this.__fetching = false;
+	            if (this.__fetchTimeoutId !== 0) {
+	                clearTimeout(this.__fetchTimeoutId);
+	                this.__fetchTimeoutId = 0;
+	            }
 	        }
 	    };
 	    Player.prototype._loggerTag = function () {
 	        return this['constructor']['name'] + " " + this.__channelId;
+	    };
+	    Player.prototype.__supportsAudioManager = function () {
+	        return (!this.__isAndroid() &&
+	            !this.__isIPhone() &&
+	            !this.__isSafari());
+	    };
+	    Player.prototype.__isAndroid = function () {
+	        return navigator.userAgent.indexOf('Android') !== -1;
+	    };
+	    Player.prototype.__isIPhone = function () {
+	        return navigator.userAgent.indexOf('iPhone') !== -1;
+	    };
+	    Player.prototype.__isSafari = function () {
+	        return navigator.userAgent.indexOf('Chrome') === -1 && navigator.userAgent.indexOf('Safari') !== -1;
 	    };
 	    Player.prototype.__startFetching = function () {
 	        if (!this.__fetching) {
@@ -201,7 +240,7 @@
 	            .then(function (playlist) {
 	            _this.__playlist = playlist;
 	            _this.__onPlayListFetched(playlist);
-	            _this.__started && _this.__audioManager.update(_this.__playlist, _this.__clock);
+	            _this.__started && _this.__audioManager && _this.__audioManager.update(_this.__playlist, _this.__clock);
 	            _this.__scheduleNextFetch();
 	        })
 	            .catch(function (error) {
@@ -226,7 +265,17 @@
 	        this._trigger('track-position', track, position, duration);
 	    };
 	    Player.prototype.__onAudioManagerPlaybackStarted = function (track) {
+	        if (!this.__playbackStartedEmitted) {
+	            this._trigger('playback-started');
+	            this.__playbackStartedEmitted = true;
+	        }
 	        this._trigger('track-playback-started', track);
+	    };
+	    Player.prototype.__onStreamManagerPlaybackStarted = function () {
+	        if (!this.__playbackStartedEmitted) {
+	            this._trigger('playback-started');
+	            this.__playbackStartedEmitted = true;
+	        }
 	    };
 	    return Player;
 	}(Base_1.Base));
@@ -767,6 +816,7 @@
 	        for (var id in this.__audioPlayers) {
 	            this.__removeAudioPlayer(id);
 	        }
+	        return this;
 	    };
 	    AudioManager.prototype.setVolume = function (volume) {
 	        if (volume < 0.0 || volume > 1.0) {
@@ -1082,6 +1132,130 @@
 	    return HTMLPlayer;
 	}(Base_1.Base));
 	exports.HTMLPlayer = HTMLPlayer;
+
+
+/***/ },
+/* 12 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+	var __extends = (this && this.__extends) || function (d, b) {
+	    for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p];
+	    function __() { this.constructor = d; }
+	    d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
+	};
+	var Base_1 = __webpack_require__(2);
+	var StreamManager = (function (_super) {
+	    __extends(StreamManager, _super);
+	    function StreamManager(channelId) {
+	        var _this = _super.call(this) || this;
+	        _this.__volume = 1.0;
+	        _this.__started = false;
+	        _this.__restartTimeoutId = 0;
+	        _this.__channelId = channelId;
+	        return _this;
+	    }
+	    StreamManager.prototype.start = function () {
+	        if (!this.__started) {
+	            this.debug('Starting');
+	            this.__started = true;
+	            this.__startPlayback();
+	        }
+	        else {
+	            throw new Error('Attempt to start Stream Manager that is already started');
+	        }
+	        return this;
+	    };
+	    StreamManager.prototype.stop = function () {
+	        if (this.__started) {
+	            this.debug('Stopping');
+	            this.__stopPlayback();
+	            this.__started = false;
+	        }
+	        else {
+	            throw new Error('Attempt to stop Stream Manager that is not started');
+	        }
+	        return this;
+	    };
+	    StreamManager.prototype.setVolume = function (volume) {
+	        if (volume < 0.0 || volume > 1.0) {
+	            throw new Error('Volume out of range');
+	        }
+	        this.__volume = volume;
+	        if (this.__audio) {
+	            this.__audio.volume = volume;
+	        }
+	        return this;
+	    };
+	    StreamManager.prototype._loggerTag = function () {
+	        return "" + this['constructor']['name'];
+	    };
+	    StreamManager.prototype.__onAudioError = function (e) {
+	        this.warn('Error');
+	        this.__stopPlayback();
+	        this.__scheduleRestart();
+	    };
+	    StreamManager.prototype.__onAudioEnded = function (e) {
+	        this.debug('EOS');
+	        this.__stopPlayback();
+	        this.__scheduleRestart();
+	    };
+	    StreamManager.prototype.__onAudioWaiting = function (e) {
+	        this.warn('Waiting');
+	    };
+	    StreamManager.prototype.__onAudioStalled = function (e) {
+	        this.warn('Stalled');
+	    };
+	    StreamManager.prototype.__onAudioSuspended = function (e) {
+	        this.warn('Suspended');
+	    };
+	    StreamManager.prototype.__startPlayback = function () {
+	        this.debug('Starting playback');
+	        this.__audio = new Audio();
+	        this.__audio.volume = this.__volume;
+	        this.__audio.src = "http://cluster.radiokitstream.org/" + this.__channelId + ".mp3";
+	        this.__audio.onerror = this.__onAudioError.bind(this);
+	        this.__audio.onended = this.__onAudioEnded.bind(this);
+	        this.__audio.onwaiting = this.__onAudioWaiting.bind(this);
+	        this.__audio.onstalled = this.__onAudioStalled.bind(this);
+	        this.__audio.onsuspend = this.__onAudioSuspended.bind(this);
+	        this.__audio.play();
+	        this._trigger('playback-started');
+	    };
+	    StreamManager.prototype.__stopPlayback = function () {
+	        this.debug('Stopping playback');
+	        if (this.__audio) {
+	            this.__audio.onerror = undefined;
+	            this.__audio.onended = undefined;
+	            this.__audio.onwaiting = undefined;
+	            this.__audio.onstalled = undefined;
+	            this.__audio.onsuspend = undefined;
+	            if (this.__audio.readyState == 4) {
+	                this.__audio.pause();
+	            }
+	            this.__audio.src = '';
+	            delete this.__audio;
+	            this.__audio = undefined;
+	        }
+	        if (this.__restartTimeoutId !== 0) {
+	            clearTimeout(this.__restartTimeoutId);
+	            this.__restartTimeoutId = 0;
+	        }
+	    };
+	    StreamManager.prototype.__scheduleRestart = function () {
+	        var _this = this;
+	        if (this.__started) {
+	            var timeout = 500 + Math.round(Math.random() * 250);
+	            this.debug("Scheduling restart in " + timeout + " ms");
+	            this.__restartTimeoutId = setTimeout(function () {
+	                _this.__restartTimeoutId = 0;
+	                _this.__startPlayback();
+	            }, timeout);
+	        }
+	    };
+	    return StreamManager;
+	}(Base_1.Base));
+	exports.StreamManager = StreamManager;
 
 
 /***/ }

@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html>
 <head>
   <title>RadioKit JS Toolkit Playback Demo</title>
@@ -32,6 +33,20 @@
           throw reason;
         });
     });
+
+    window.player.on('channel-metadata-update', function(payload) {
+      // Metadata
+      var metadataInfo = payload.metadata;
+      var metadataText = 'METADATA:<ul>';
+      metadataKeys = Object.keys(metadataInfo);
+      for(var i = 0; i < metadataKeys.length; i++) {
+        metadataText += '<li><b>' + metadataKeys[i] + '</b>: ' + metadataInfo[metadataKeys[i]] + '</li>';
+      }
+      metadataText += '</ul>';
+
+      document.getElementById('track-metadata').innerHTML = metadataText;
+    });
+
     window.player.on('track-position', function(track, position, duration) {
       document.getElementById('track-position').innerHTML = 'POSITION: ' + position + ' / ' + duration + ' ms';
     });
